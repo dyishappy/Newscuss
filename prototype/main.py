@@ -8,7 +8,7 @@ from newspaper import Article
 
 client = OpenAI(api_key="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")
 
-# 주어진 URL로부터 뉴스 기사의 텍스트 추출
+# 1. 주어진 URL로부터 뉴스 기사의 텍스트 추출
 def extract_article_text(url):
     try:
         article = Article(url)
@@ -19,7 +19,7 @@ def extract_article_text(url):
         print(f"기사 추출 중 오류 발생: {e}")
         return None
 
-# 추출된 기사를 GPT API를 이용해 간결하게 요약
+# 2. 추출된 기사를 GPT API를 이용해 간결하게 요약
 def summarize_text_with_gpt(article_text, model="gpt-4o"):
     try:
         instructions = "다음 뉴스 기사를 간결하게 요약해 주세요."
@@ -34,7 +34,7 @@ def summarize_text_with_gpt(article_text, model="gpt-4o"):
         print(f"요약 생성 중 오류 발생: {e}")
         return None
 
-# 요약문을 입력받아, 사용자가 지정한 개수만큼 핵심 키워드를 추출합니다.(default=2) 지시문에서는 키워드만 쉼표로 구분하여 출력하도록 요청
+# 3. 요약문을 입력받아, 사용자가 지정한 개수만큼 핵심 키워드를 추출합니다.(default=2) 지시문에서는 키워드만 쉼표로 구분하여 출력하도록 요청
 def extract_keywords_from_summary(summary_text, num_keywords=2, model="gpt-4o"):
     try:
         instructions = f"다음 요약문에서 핵심 키워드를 {num_keywords}개만 추출해 주세요. 단순하게 빈도가 높은 단어가 아니라, 전체 내용에서 중요한 키워드를 추출해주고 키워드만 쉼표로 구분하여 출력해 주세요."
@@ -48,9 +48,9 @@ def extract_keywords_from_summary(summary_text, num_keywords=2, model="gpt-4o"):
     except Exception as e:
         print(f"핵심 키워드 추출 중 오류 발생: {e}")
         return None
-# Discussion! prompt 잘 줘봐도 요약문으로 키워드 추출하는게 뭔가 성능이 않좋아보임. 차라리 요약문 만들 때 그냥 키워드도 원문에서 뽑는게 나을것 같음
+# Discussion! prompt 잘 줘봐도 요약문으로 키워드 추출하는게 뭔가 성능이 않좋아보임. 차라리 요약문 만들 때 그냥 키워드도 원문에서 뽑는게 나을것 같음.
     
-# 요약문과 핵심 키워드를 바탕으로 토론 주제를 생성 
+# 4. 요약문과 핵심 키워드를 바탕으로 토론 주제를 생성 
 def generate_discussion_topic(summary_text, keywords, model="gpt-4o"):
     try:
         instructions = (
@@ -72,7 +72,7 @@ def generate_discussion_topic(summary_text, keywords, model="gpt-4o"):
         print(f"토론 주제 생성 중 오류 발생: {e}")
         return None
 
-# GPT와 찬/반, 수준을 선택하여 토론하고 결과를 반환해줌
+# 5. GPT와 찬/반, 수준을 선택하여 토론하고 결과를 반환해줌
 def interactive_debate(topic, user_stance, debate_level, model="gpt-4o"):
     # 사용자 입장에 따라 GPT의 반대 입장을 결정합니다.
     if user_stance == "찬성":
@@ -116,7 +116,7 @@ def interactive_debate(topic, user_stance, debate_level, model="gpt-4o"):
         messages.append({"role": "assistant", "content": assistant_reply})
     return messages
 
-# 토론 내용을 요약하고 토론 결과 출력
+# 6. 토론 내용을 요약하고 토론 결과 출력
 def summarize_and_print_debate_results(messages, model="gpt-4o"):
     """
     전체 토론 대화 내역을 요약하고 토론 결과를 출력합니다.
