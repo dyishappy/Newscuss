@@ -6,7 +6,7 @@ from newspaper import Article
 # 전역 변수로 클라이언트 초기화
 # client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-client = OpenAI(api_key="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")
+# client = OpenAI(api_key="여기 넣을 키 복붙")
 
 # 1. 주어진 URL로부터 뉴스 기사의 텍스트 추출
 def extract_article_text(url):
