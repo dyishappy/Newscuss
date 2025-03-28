@@ -1,11 +1,12 @@
 import os
 from openai import OpenAI
+import openai
 from newspaper import Article
 
 # 전역 변수로 클라이언트 초기화
 # client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-# client = OpenAI(api_key="여기 gpt api 키 넣어줘야함! 이 라인 아에 지우고 공유사항 폴더에 있는 거 복붙ㄱㄱ")
+client = OpenAI(api_key="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")
 
 # 주어진 URL로부터 뉴스 기사의 텍스트 추출
 def extract_article_text(url):
@@ -71,8 +72,73 @@ def generate_discussion_topic(summary_text, keywords, model="gpt-4o"):
         print(f"토론 주제 생성 중 오류 발생: {e}")
         return None
 
+# GPT와 찬/반, 수준을 선택하여 토론하고 결과를 반환해줌
+def interactive_debate(topic, user_stance, debate_level, model="gpt-4o"):
+    # 사용자 입장에 따라 GPT의 반대 입장을 결정합니다.
+    if user_stance == "찬성":
+        opponent_stance = "반대"
+    elif user_stance == "반대":
+        opponent_stance = "찬성"
+    else:
+        print("입력한 토론 입장이 올바르지 않습니다. '찬성' 또는 '반대'로 입력해 주세요.")
+        return None
+
+    # 초기 시스템 메시지를 포함하여 대화 내역을 생성합니다.
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                f"당신은 토론에 참여하는 인공지능 토론자입니다. "
+                f"토론 주제는 '{topic}'입니다. "
+                f"사용자(나)의 입장은 '{user_stance}'이고, 당신은 자동으로 반대 입장인 '{opponent_stance}'를 취해야 합니다. "
+                f"토론 수준은 '{debate_level}'로 진행합니다. "
+                "대화는 계속 이어지며, 이전 대화 내용을 모두 반영하여 답변해 주세요."
+            )
+        }
+    ]
+
+    print("\n토론을 시작합니다. 종료하려면 'exit'를 입력하세요.")
+    while True:
+        user_input = input("\n당신: ")
+        if user_input.lower() in ['exit', 'quit']:
+            print("토론을 종료합니다.")
+            break
+        # 사용자의 메시지를 추가합니다.
+        messages.append({"role": "user", "content": user_input})
+        # Chat Completions API를 이용하여 응답을 생성합니다.
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages
+        )
+        assistant_reply = response.choices[0].message.content.strip()
+        print("\nGPT (반대 입장):", assistant_reply)
+        # 응답을 대화 내역에 추가합니다.
+        messages.append({"role": "assistant", "content": assistant_reply})
+    return messages
+
+# 토론 내용을 요약하고 토론 결과 출력
+def summarize_and_print_debate_results(messages, model="gpt-4o"):
+    """
+    전체 토론 대화 내역을 요약하고 토론 결과를 출력합니다.
+    """
+    # 대화 내역을 텍스트로 변환 (시스템 메시지를 제외하거나 포함할 수 있음)
+    conversation_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+    instructions = (
+        "다음 대화 내용을 바탕으로 전체 토론을 간결하게 요약하고 토론 결과를 출력해 주세요. "
+        "각 참여자의 주장, 토론의 흐름, 그리고 최종 결론(있는 경우)을 포함해 주세요.\n\n"
+        f"{conversation_text}"
+    )
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": instructions}
+        ]
+    )
+    summary = response.choices[0].message.content.strip()
+    print("\n=== 토론 요약 및 결과 ===")
+    print(summary)
+
 if __name__ == '__main__':
-    # 기사 URL 입력
     url = input("기사 URL을 입력해 주세요: ")
     article_text = extract_article_text(url)
     if article_text:
@@ -87,5 +153,15 @@ if __name__ == '__main__':
         topic = generate_discussion_topic(summary, keywords)
         print("\n=== 토론 주제 ===")
         print(topic)
+        
+        user_stance = input("\n토론에서 당신의 입장을 선택해 주세요 (찬성/반대): ").strip()
+        debate_level = input("토론 수준을 선택해 주세요 (초급/중급/상급): ").strip()
+        
+        # interactive_debate 함수 내에서 대화가 진행되고, 최종 대화 내역을 반환받습니다.
+        messages = interactive_debate(topic, user_stance, debate_level)
+        
+        # 토론이 끝난 후 전체 대화 내용을 요약하고 결과를 출력합니다.
+        if messages:
+            summarize_and_print_debate_results(messages)
     else:
         print("기사 텍스트를 추출하지 못했습니다.")
