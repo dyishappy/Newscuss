@@ -1,0 +1,7 @@
+# !!여기 작성 되용은 git hub에 저장되지 않게 함!!
+
+# ignore __pycache__
+__pycache__/
+
+# .DS_Store파일은 macOS에서 Finder가 폴더의 메타데이터를 저장하기 위해 생성됨
+.DS_Store
