@@ -117,32 +117,6 @@ python app.py
 
 ---
 
-## 📋 프로젝트 구조
-
-### 프론트엔드
-```
-src/
-├── app/                 # Next.js 페이지 컴포넌트
-├── components/          # 재사용 가능한 UI 컴포넌트
-├── context/             # React Context (상태 관리)
-├── services/            # API 서비스 통신 로직
-└── utils/               # 유틸리티 함수
-```
-
-### 백엔드
-```
-src/main/
-├── java/
-│   └── com/example/newscussbe/
-│       ├── controller/  # REST API 엔드포인트
-│       ├── dto/         # 데이터 전송 객체
-│       ├── service/     # 비즈니스 로직
-│       └── client/      # Python API 클라이언트
-└── resources/           # 설정 파일
-```
-
----
-
 ## 📚 레포지토리
 
 - **프론트엔드**: [https://github.com/sttarrynight/newscuss-fe](https://github.com/sttarrynight/newscuss-fe)
