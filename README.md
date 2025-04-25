@@ -34,3 +34,122 @@ AI와의 대화를 통해 다른 관점을 이해하고, 자신의 입장을 점
 ✅ **입장 선택 및 토론 진행** – 사용자가 찬/반을 선택하면, AI가 반대 입장에서 논리 전개  
 ✅ **대화형 토론 UI** – 웹 기반 인터페이스에서 실시간 토론 지원  
 ✅ **사용자 맞춤형 논쟁 수준 조정** – 초보자부터 전문가까지 다양한 스타일 지원
+
+---
+
+## 🛠️ 기술 스택
+
+### 프론트엔드
+- **Framework**: Next.js (v15.3.0)
+- **UI Library**: React (v19.0.0)
+- **Styling**: TailwindCSS (v4)
+- **State Management**: React Context API
+
+### 백엔드
+- **Framework**: Spring Boot (v3.4.4)
+- **AI Integration**: Python Flask API
+- **Language Models**: OpenAI GPT
+- **News Article Processing**: newspaper3k
+
+---
+
+## 💻 아키텍처
+
+```
+┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
+│                 │      │                 │      │                 │
+│  Next.js        │◄────►│  Spring Boot    │◄────►│  Python Flask   │
+│  Frontend       │      │  Backend        │      │  AI Service     │
+│                 │      │                 │      │                 │
+└─────────────────┘      └─────────────────┘      └─────────────────┘
+                                                          ▲
+                                                          │
+                                                          ▼
+                                                  ┌─────────────────┐
+                                                  │                 │
+                                                  │  OpenAI API     │
+                                                  │                 │
+                                                  └─────────────────┘
+```
+
+---
+
+## 🚀 시작하기
+
+### 프론트엔드 실행
+```bash
+# Clone frontend repository
+git clone https://github.com/sttarrynight/newscuss-fe.git
+cd newscuss-fe
+
+# Install dependencies
+npm install
+
+# Run development server
+npm run dev
+```
+
+### 백엔드 실행
+```bash
+# Clone backend repository
+git clone https://github.com/sttarrynight/newscuss-be.git
+cd newscuss-be
+
+# Build with Gradle
+./gradlew build
+
+# Run Spring Boot application
+java -jar build/libs/newscuss-be-0.0.1-SNAPSHOT.jar
+```
+
+### Python Flask 서비스 실행
+```bash
+# Clone backend repository (if not already done)
+git clone https://github.com/sttarrynight/newscuss-be.git
+cd newscuss-be
+
+# Install Python dependencies
+pip install -r requirements.txt
+
+# Run Flask server
+python app.py
+```
+
+---
+
+## 📋 프로젝트 구조
+
+### 프론트엔드
+```
+src/
+├── app/                 # Next.js 페이지 컴포넌트
+├── components/          # 재사용 가능한 UI 컴포넌트
+├── context/             # React Context (상태 관리)
+├── services/            # API 서비스 통신 로직
+└── utils/               # 유틸리티 함수
+```
+
+### 백엔드
+```
+src/main/
+├── java/
+│   └── com/example/newscussbe/
+│       ├── controller/  # REST API 엔드포인트
+│       ├── dto/         # 데이터 전송 객체
+│       ├── service/     # 비즈니스 로직
+│       └── client/      # Python API 클라이언트
+└── resources/           # 설정 파일
+```
+
+---
+
+## 📚 레포지토리
+
+- **프론트엔드**: [https://github.com/sttarrynight/newscuss-fe](https://github.com/sttarrynight/newscuss-fe)
+- **백엔드**: [https://github.com/sttarrynight/newscuss-be](https://github.com/sttarrynight/newscuss-be)
+
+---
+
+## 📝 라이센스
+
+MIT License
