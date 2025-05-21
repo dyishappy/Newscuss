@@ -12,7 +12,8 @@ def extract_article_text(url):
         article = Article(url)
         article.download()
         article.parse()
-        return article.text
+        cleaned_text = article.text.replace('사진 확대', '').strip()
+        return cleaned_text
     except Exception as e:
         print(f"기사 추출 중 오류 발생: {e}")
         return None

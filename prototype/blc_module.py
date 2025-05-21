@@ -6,14 +6,14 @@ import torch
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
 
-
 # 1. 주어진 URL로부터 뉴스 기사의 텍스트 추출
 def extract_article_text(url):
     try:
         article = Article(url)
         article.download()
         article.parse()
-        return article.text
+        cleaned_text = article.text.replace('사진 확대', '').strip()
+        return cleaned_text
     except Exception as e:
         print(f"기사 추출 중 오류 발생: {e}")
         return None
