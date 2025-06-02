@@ -3,6 +3,7 @@ from openai import OpenAI
 import openai
 from newspaper import Article
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForCausalLM, PreTrainedTokenizerFast
+import torch
 
 # 1. 주어진 URL로부터 뉴스 기사의 텍스트 추출
 def extract_article_text(url):
@@ -33,11 +34,11 @@ def summarize_text_with_gpt(client, article_text, model="gpt-4o"):
         print(f"요약 생성 중 오류 발생: {e}")
         return None
     
-# 2-2. HyperCLOVAX-SEED-Text-Instruct-1.5B -> unfinished
+# 2-2. HyperCLOVAX-SEED-Text-Instruct-1.5B
 def summarize_text_with_clova(
     article_text: str,
-    ckpt_path: str,
     cache_dir: str = None,
+    #ckpt_path: "/path/to/ckpt",
     max_summary_length: int = 256,
     num_beams: int = 4,
 ) -> str:
@@ -49,60 +50,59 @@ def summarize_text_with_clova(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # 2) 토크나이저·모델 로드
-    tokenizer = AutoTokenizer.from_pretrained(
-        ckpt_path,
-        cache_dir=cache_dir,
-        trust_remote_code=True,   # 커스텀 코드 포함 모델일 때
-        use_fast=False
-    )
-    model = AutoModelForCausalLM.from_pretrained(
-        ckpt_path,
-        cache_dir=cache_dir,
-        trust_remote_code=True,
-        low_cpu_mem_usage=True
-    ).to(device, non_blocking=True)
+    tokenizer = AutoTokenizer.from_pretrained("/nas/home/llddyy0319/cap/Newscuss/prototype/HyperCLOVAX-SEED-Text-Instruct-1.5B")
+    model = AutoModelForCausalLM.from_pretrained("/nas/home/llddyy0319/cap/Newscuss/prototype/HyperCLOVAX-SEED-Text-Instruct-1.5B").to(device)
     model.eval()
 
     # 3) 챗 템플릿 구성
     chat = [
         {"role": "tool_list", "content": ""},
         {"role": "system", "content":
-            "- AI 언어모델의 이름은 \"CLOVA X\"이며 네이버에서 만들었습니다.\n"
-            "- 오늘은 2025년 04월 24일(목)입니다."
+            "너는 뉴스 기사를 요약해주는 ai야."
         },
         {"role": "user", "content":
-            f"다음 뉴스를 한국어로 간결하게 요약해 주세요:\n\n{article_text}"
+            f"다음 뉴스를 한국어로 3문장으로 요약해 주세요:\n\n{article_text}"
         },
     ]
 
-    # 4) 템플릿 → 토크나이즈
+    # 4) 토크나이징 + 텐서 변환
     inputs = tokenizer.apply_chat_template(
         chat,
         add_generation_prompt=True,
         return_dict=True,
-        return_tensors="pt",
+        return_tensors="pt"
     )
-    inputs = {k: v.to(device) for k, v in inputs.items()}
 
-    # 5) 요약 생성
-    with torch.no_grad():
-        output_ids = model.generate(
-            **inputs,
-            max_new_tokens=max_summary_length,
-            num_beams=num_beams,
-            early_stopping=True,
-            no_repeat_ngram_size=3,
-            length_penalty=2.0,
-            stop_strings=["<|endofturn|>", "<|stop|>"],
-            tokenizer=tokenizer,
-        )
+    # ← 여기서 inputs 안의 모든 텐서를 model 과 같은 device(CUDA)로 이동
+    inputs = { k: v.to(device) for k, v in inputs.items() }
 
-    # 6) 디코딩 및 반환
-    decoded = tokenizer.batch_decode(output_ids, skip_special_tokens=True)
-    # 보통 [0]번째에 결과가 들어옵니다.
-    return decoded[0].strip()
+    # 5) 생성
+    output_ids = model.generate(
+        **inputs,
+        max_length=1024,
+        stop_strings=["<|endofturn|>", "<|stop|>"],
+        tokenizer=tokenizer
+    )
 
-# 2-3. koGPT -> unfinished
+    # 1) Special Token을 스킵하고 깨끗하게 디코딩
+    raw_output = tokenizer.batch_decode(
+        output_ids,
+        skip_special_tokens=True,
+        clean_up_tokenization_spaces=True
+    )[0]
+
+    # 2) 혹시 “assistant” 같은 롤 태그까지 붙어 나온다면, 그 부분만 잘라내기
+    #    (예: "<|im_start|>assistant\n내용<|endofturn|>" 형태)
+    if "assistant" in raw_output:
+        # "assistant" 뒤에 나오는 본문만 취득
+        answer = raw_output.split("assistant", 1)[-1].strip()
+    else:
+        answer = raw_output.strip()
+
+    return answer
+
+
+# 2-3. koGPT
 def summarize_text_with_kogpt(
     article_text: str,
     revision: str = "KoGPT6B-ryan1.5b-float16",
@@ -120,60 +120,24 @@ def summarize_text_with_kogpt(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # 2) 토크나이저·모델 로드
-    model_id = "kakaobrain/kogpt"
     tokenizer = AutoTokenizer.from_pretrained(
-        model_id,
-        revision=revision,
-        bos_token='[BOS]', eos_token='[EOS]',
-        unk_token='[UNK]', pad_token='[PAD]', mask_token='[MASK]',
-        cache_dir=cache_dir,
-        use_fast=False,
+        'kakaobrain/kogpt', revision='KoGPT6B-ryan1.5b-float16',  # or float32 version: revision=KoGPT6B-ryan1.5b
+        bos_token='[BOS]', eos_token='[EOS]', unk_token='[UNK]', pad_token='[PAD]', mask_token='[MASK]'
     )
     model = AutoModelForCausalLM.from_pretrained(
-        model_id,
-        revision=revision,
+        'kakaobrain/kogpt', revision='KoGPT6B-ryan1.5b-float16',  # or float32 version: revision=KoGPT6B-ryan1.5b
         pad_token_id=tokenizer.eos_token_id,
-        torch_dtype='auto',
-        low_cpu_mem_usage=True,
-        cache_dir=cache_dir,
-    ).to(device, non_blocking=True)
-    model.eval()
-
-    # 3) 프롬프트 구성
-    prompt = (
-        f"다음 텍스트를 읽고, 한국어로 간결하게 요약하세요:\n\n"
-        f"{article_text}\n\n"
-        "요약:"
-    )
-
-    # 4) 토크나이즈 & 텐서 변환
-    inputs = tokenizer.encode(
-        prompt,
-        return_tensors="pt",
-        max_length=max_input_length,
-        truncation=True,
-        padding="longest",
+        torch_dtype='auto', low_cpu_mem_usage=True
     ).to(device)
+    _ = model.eval()
 
-    # 5) 요약 텍스트 생성
+    prompt = f'Q: 다음 뉴스를 한국어로 3문장으로 요약해 주세요:\n\n{article_text}\nA:'
     with torch.no_grad():
-        output_ids = model.generate(
-            inputs,
-            max_length=min(max_input_length, inputs.shape[-1] + max_summary_length),
-            num_beams=num_beams,
-            early_stopping=True,
-            no_repeat_ngram_size=3,
-            length_penalty=2.0,
-            temperature=temperature,
-        )
+        tokens = tokenizer.encode(prompt, return_tensors='pt').to(device='cuda', non_blocking=True)
+        gen_tokens = model.generate(tokens, do_sample=True, temperature=0.8, max_length=1024)
+        generated = tokenizer.batch_decode(gen_tokens)[0]
 
-    # 6) 디코딩 및 프롬프트 제거
-    summary = tokenizer.decode(output_ids[0], skip_special_tokens=True)
-    # "요약:" 이후 부분만 추출
-    if "요약:" in summary:
-        summary = summary.split("요약:", 1)[1].strip()
-
-    return summary
+    return generated
 
 # 2-4. bart-large-cnn
 def summarize_text_with_blc(
