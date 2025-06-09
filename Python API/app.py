@@ -275,40 +275,49 @@ def call_openai_with_retry(func, *args, max_retries=MAX_RETRIES, initial_backoff
     raise Exception(f"최대 재시도 횟수({max_retries})를 초과했습니다.")
 
 
-# 7. 토론 요약 생성 (메시지 압축 및 재시도 로직 최적화)
+# 7. 토론 요약 생성 (개선된 버전)
 def generate_discussion_summary(topic, user_position, ai_position, messages, model="gpt-4o"):
+    """
+    토론 요약 생성 함수 - 단순화된 메시지 압축 로직 적용
+
+    - 30개 이하: 전체 메시지 그대로 사용
+    - 30개 초과: 처음 10개 + 마지막 15개 + 중간 5개 (총 30개)
+    """
     try:
-        # 메시지 압축: 각 메시지의 내용을 최대 200자로 제한
-        def truncate_message(text, max_length=200):
-            if len(text) <= max_length:
-                return text
-            return text[:max_length] + "..."
-
-        # 메시지가 15개 이상이면 샘플링
-        compressed_messages = []
-        if len(messages) > 15:
-            # 처음 3개, 마지막 7개, 나머지 중 5개 선택
-            important_messages = (
-                    messages[:3] +  # 처음 3개
-                    messages[3:-7:len(messages[3:-7]) // 5 + 1] +  # 중간에서 샘플링해서 5개
-                    messages[-7:]  # 마지막 7개
-            )
-            compressed_messages = important_messages
+        # 메시지 개수에 따른 처리
+        if len(messages) <= 30:
+            # 30개 이하면 전체 메시지 사용
+            processed_messages = messages
+            logger.info(f"전체 메시지 사용: {len(messages)}개")
         else:
-            compressed_messages = messages
+            # 30개 초과시 압축
+            first_10 = messages[:10]
+            last_15 = messages[-15:]
 
-        # 내용 압축
-        compressed_text = []
-        for msg in compressed_messages:
+            # 중간에서 5개 선택 (첫 10개와 마지막 15개 사이)
+            middle_start = 10
+            middle_end = len(messages) - 15
+            if middle_end > middle_start:
+                middle_step = max(1, (middle_end - middle_start) // 5)
+                middle_5 = messages[middle_start:middle_end:middle_step][:5]
+            else:
+                middle_5 = []
+
+            processed_messages = first_10 + middle_5 + last_15
+            logger.info(f"메시지 압축: {len(messages)}개 -> {len(processed_messages)}개")
+
+        # 대화 텍스트 구성
+        conversation_parts = []
+        for msg in processed_messages:
             role = msg["role"]
-            content = truncate_message(msg["content"])
-            compressed_text.append(f"{role}: {content}")
+            content = msg["content"]
+            conversation_parts.append(f"{role}: {content}")
 
-        conversation_text = "\n".join(compressed_text)
+        conversation_text = "\n".join(conversation_parts)
 
-        # 압축 정보 추가
-        if len(messages) > len(compressed_messages):
-            compression_note = f"\n\n[참고: 원본 대화는 {len(messages)}개의 메시지로 구성되어 있으며, 위 내용은 주요 {len(compressed_messages)}개 메시지의 요약입니다.]"
+        # 압축 정보 추가 (압축된 경우에만)
+        if len(messages) > 30:
+            compression_note = f"\n\n[참고: 원본 대화는 {len(messages)}개의 메시지로 구성되어 있으며, 위 내용은 주요 {len(processed_messages)}개 메시지입니다.]"
             conversation_text += compression_note
 
         system_message = (
@@ -342,8 +351,9 @@ def generate_discussion_summary(topic, user_position, ai_position, messages, mod
 
     except Exception as e:
         logger.error(f"토론 요약 생성 중 오류 발생: {e}")
-        # 요약 실패 시 기본 메시지 제공
-        return "죄송합니다, 토론 요약을 생성하는데 문제가 발생했습니다. 토론 내용이 너무 길거나 복잡할 수 있습니다."
+        # 재시도 실패 시에도 의미있는 에러 메시지 반환
+        raise Exception("토론 요약 생성에 실패했습니다. 토론 내용이 너무 길거나 API 요청 한도에 도달했을 수 있습니다.")
+
 
 # API 엔드포인트 정의
 
@@ -433,7 +443,7 @@ def message_api():
     return jsonify({"message": ai_response})
 
 
-# 5. 토론 요약 API
+# 5. 토론 요약 API (개선된 버전)
 @app.route('/api/discussion/summary', methods=['POST'])
 def summary_api():
     data = request.json
@@ -448,28 +458,11 @@ def summary_api():
     logger.info(f"Generating summary for topic: {topic}, messages count: {len(messages)}")
 
     try:
-        # 메시지 수가 너무 많을 경우 일부 생략 처리
-        if len(messages) > 30:
-            logger.warning(f"메시지가 너무 많습니다: {len(messages)}개. 일부만 처리합니다.")
-            # 처음 10개, 마지막 10개, 중간에서 10개
-            sampled_messages = (
-                messages[:10] +
-                messages[10:-10:max(1, (len(messages) - 20) // 10)] +
-                messages[-10:]
-            )
-            logger.info(f"메시지 샘플링 완료: {len(sampled_messages)}개")
-            messages = sampled_messages
-
         summary = generate_discussion_summary(topic, user_position, ai_position, messages)
         return jsonify({"summary": summary})
-    except RateLimitError as e:
-        logger.error(f"Rate limit exceeded during summary generation: {e}")
-        error_message = "토론 분석 중 API 요청 한도에 도달했습니다. 잠시 후 다시 시도해주세요."
-        return jsonify({"summary": error_message, "error": str(e)}), 200  # 클라이언트에서 처리 가능하도록 200 반환
     except Exception as e:
         logger.error(f"Summary generation error: {e}")
-        error_message = "토론 요약 중 오류가 발생했습니다. 토론 내용이 너무 길거나 복잡한 경우 시간이 더 걸릴 수 있습니다."
-        return jsonify({"summary": error_message, "error": str(e)}), 200  # 클라이언트에서 처리 가능하도록 200 반환
+        return jsonify({"error": str(e)}), 500
 
 
 # 메인 실행 부분
