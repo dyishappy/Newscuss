@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 import logging
 import os
@@ -68,6 +68,35 @@ def call_openai_with_retry(func, *args, max_retries=MAX_RETRIES, initial_backoff
 
     # 모든 재시도가 실패한 경우
     raise Exception(f"최대 재시도 횟수({max_retries})를 초과했습니다.")
+
+
+# 통일된 메시지 압축 함수
+def compress_messages_for_analysis(messages):
+    """
+    메시지 압축을 위한 공통 함수
+    30개 이하면 전체 사용, 30개 초과시 처음10+중간5+마지막15 방식으로 압축
+    """
+    if len(messages) <= 30:
+        # 30개 이하면 전체 메시지 사용
+        logger.info(f"전체 메시지 사용: {len(messages)}개")
+        return messages
+    else:
+        # 30개 초과시 압축
+        first_10 = messages[:10]
+        last_15 = messages[-15:]
+
+        # 중간에서 5개 선택 (첫 10개와 마지막 15개 사이)
+        middle_start = 10
+        middle_end = len(messages) - 15
+        if middle_end > middle_start:
+            middle_step = max(1, (middle_end - middle_start) // 5)
+            middle_5 = messages[middle_start:middle_end:middle_step][:5]
+        else:
+            middle_5 = []
+
+        compressed_messages = first_10 + middle_5 + last_15
+        logger.info(f"메시지 압축: {len(messages)}개 -> {len(compressed_messages)}개")
+        return compressed_messages
 
 
 # 1. 주어진 URL로부터 뉴스 기사의 텍스트 추출
@@ -200,7 +229,11 @@ def generate_first_ai_message(topic, user_position, ai_position, difficulty, mod
             f"사용자의 입장은 '{user_position}'이고, 당신은 반대 입장인 '{ai_position}'을 취해야 합니다. "
             f"토론 수준은 '{difficulty}'로 진행합니다. "
             f"사용자와의 토론을 시작하는 첫 번째 메시지를 작성해주세요. "
-            f"상대방의 입장을 존중하되, 논리적이고 설득력 있는 주장을 펼쳐야 합니다."
+            f"상대방의 입장을 존중하되, 논리적이고 설득력 있는 주장을 펼쳐야 합니다.\n\n"
+            f"중요한 규칙:\n"
+            f"- 마크다운 문법(**, *, #, -, 1. 등)을 사용하지 마세요\n"
+            f"- 자연스러운 대화체로 작성해주세요\n"
+            f"- 문단 구분이 필요한 경우 한 줄 공백으로만 구분해주세요"
         )
 
         messages: list[ChatCompletionMessageParam] = [
@@ -224,7 +257,7 @@ def generate_first_ai_message(topic, user_position, ai_position, difficulty, mod
         return "죄송합니다, 토론을 시작하는데 문제가 발생했습니다. 다시 시도해 주세요."
 
 
-# 6. 사용자 메시지에 대한 AI 응답 생성
+# 6. 사용자 메시지에 대한 AI 응답 생성 (기존 방식)
 def generate_ai_response(topic, user_position, ai_position, difficulty, messages, model="gpt-4o"):
     try:
         system_message = (
@@ -232,7 +265,12 @@ def generate_ai_response(topic, user_position, ai_position, difficulty, messages
             f"토론 주제는 '{topic}'입니다. "
             f"사용자의 입장은 '{user_position}'이고, 당신은 반대 입장인 '{ai_position}'을 취해야 합니다. "
             f"토론 수준은 '{difficulty}'로 진행합니다. "
-            f"사용자의 메시지에 논리적이고 설득력 있게 응답해야 합니다."
+            f"사용자의 메시지에 논리적이고 설득력 있게 응답해야 합니다.\n\n"
+            f"중요한 규칙:\n"
+            f"- 마크다운 문법(**, *, #, -, 1. 등)을 절대 사용하지 마세요\n"
+            f"- 자연스러운 대화체로 작성해주세요\n"
+            f"- 문단 구분이 필요한 경우 한 줄 공백으로만 구분해주세요\n"
+            f"- 목록이나 강조가 필요한 경우 자연스러운 문장으로 표현해주세요"
         )
 
         # 메시지 히스토리 구성
@@ -265,33 +303,67 @@ def generate_ai_response(topic, user_position, ai_position, difficulty, messages
         return "죄송합니다, 응답을 생성하는데 문제가 발생했습니다. 다시 시도해 주세요."
 
 
-# 7. 토론 요약 생성 (기존)
-def generate_discussion_summary(topic, user_position, ai_position, messages, model="gpt-4o"):
+# 6-1. 사용자 메시지에 대한 AI 응답 생성 (스트리밍 방식) - 새로 추가
+def generate_ai_response_stream(topic, user_position, ai_position, difficulty, messages, model="gpt-4o"):
     """
-    토론 요약 생성 함수 - 단순화된 메시지 압축 로직 적용
+    AI 응답을 스트리밍 방식으로 생성합니다.
     """
     try:
-        # 메시지 개수에 따른 처리
-        if len(messages) <= 30:
-            # 30개 이하면 전체 메시지 사용
-            processed_messages = messages
-            logger.info(f"전체 메시지 사용: {len(messages)}개")
-        else:
-            # 30개 초과시 압축
-            first_10 = messages[:10]
-            last_15 = messages[-15:]
+        system_message = (
+            f"당신은 토론에 참여하는 인공지능 토론자입니다. "
+            f"토론 주제는 '{topic}'입니다. "
+            f"사용자의 입장은 '{user_position}'이고, 당신은 반대 입장인 '{ai_position}'을 취해야 합니다. "
+            f"토론 수준은 '{difficulty}'로 진행합니다. "
+            f"사용자의 메시지에 논리적이고 설득력 있게 응답해야 합니다.\n\n"
+            f"중요한 규칙:\n"
+            f"- 마크다운 문법(**, *, #, -, 1. 등)을 절대 사용하지 마세요\n"
+            f"- 자연스러운 대화체로 작성해주세요\n"
+            f"- 문단 구분이 필요한 경우 한 줄 공백으로만 구분해주세요\n"
+            f"- 목록이나 강조가 필요한 경우 자연스러운 문장으로 표현해주세요"
+        )
 
-            # 중간에서 5개 선택 (첫 10개와 마지막 15개 사이)
-            middle_start = 10
-            middle_end = len(messages) - 15
-            if middle_end > middle_start:
-                middle_step = max(1, (middle_end - middle_start) // 5)
-                middle_5 = messages[middle_start:middle_end:middle_step][:5]
+        # 메시지 히스토리 구성
+        gpt_messages: list[ChatCompletionMessageParam] = [
+            ChatCompletionSystemMessageParam(
+                role="system",
+                content=system_message
+            )
+        ]
+
+        for msg in messages:
+            if msg["role"] == "user":
+                gpt_messages.append(ChatCompletionUserMessageParam(
+                    role="user",
+                    content=msg["content"]
+                ))
             else:
-                middle_5 = []
+                gpt_messages.append(ChatCompletionAssistantMessageParam(
+                    role="assistant",
+                    content=msg["content"]
+                ))
 
-            processed_messages = first_10 + middle_5 + last_15
-            logger.info(f"메시지 압축: {len(messages)}개 -> {len(processed_messages)}개")
+        # 스트리밍 응답 생성
+        stream = client.chat.completions.create(
+            model=model,
+            messages=gpt_messages,
+            stream=True,
+            temperature=0.7
+        )
+
+        return stream
+    except Exception as e:
+        logger.error(f"AI 스트리밍 응답 생성 중 오류 발생: {e}")
+        return None
+
+
+# 7. 토론 요약 생성 (기존, 통일된 압축 방식 적용)
+def generate_discussion_summary(topic, user_position, ai_position, messages, model="gpt-4o"):
+    """
+    토론 요약 생성 함수 - 통일된 메시지 압축 로직 적용
+    """
+    try:
+        # 통일된 압축 방식 사용
+        processed_messages = compress_messages_for_analysis(messages)
 
         # 대화 텍스트 구성
         conversation_parts = []
@@ -342,34 +414,24 @@ def generate_discussion_summary(topic, user_position, ai_position, messages, mod
         raise Exception("토론 요약 생성에 실패했습니다. 토론 내용이 너무 길거나 API 요청 한도에 도달했을 수 있습니다.")
 
 
-# 8. 토론 점수 평가 생성 (new_func.py에서 추가)
+# 8. 토론 점수 평가 생성 (통일된 압축 방식 적용)
 def generate_discussion_scores_with_comments(topic, user_position, ai_position, messages, model="gpt-4o"):
     """
-    점수와 함께 각 카테고리별 간단한 코멘트를 반환하는 함수
+    점수와 함께 각 카테고리별 간단한 코멘트를 반환하는 함수 - 통일된 압축 방식 적용
     """
     try:
-        # 메시지 압축: 각 메시지의 내용을 최대 200자로 제한
+        # 통일된 압축 방식 사용
+        processed_messages = compress_messages_for_analysis(messages)
+
+        # 메시지 내용을 최대 200자로 제한하여 추가 압축
         def truncate_message(text, max_length=200):
             if len(text) <= max_length:
                 return text
             return text[:max_length] + "..."
 
-        # 메시지가 15개 이상이면 샘플링
-        compressed_messages = []
-        if len(messages) > 15:
-            # 처음 3개, 마지막 7개, 나머지 중 5개 선택
-            important_messages = (
-                    messages[:3] +
-                    messages[3:-7:len(messages[3:-7]) // 5 + 1] +
-                    messages[-7:]
-            )
-            compressed_messages = important_messages
-        else:
-            compressed_messages = messages
-
         # 내용 압축
         compressed_text = []
-        for msg in compressed_messages:
+        for msg in processed_messages:
             role = msg["role"]
             content = truncate_message(msg["content"])
             compressed_text.append(f"{role}: {content}")
@@ -377,8 +439,8 @@ def generate_discussion_scores_with_comments(topic, user_position, ai_position, 
         conversation_text = "\n".join(compressed_text)
 
         # 압축 정보 추가
-        if len(messages) > len(compressed_messages):
-            compression_note = f"\n\n[참고: 원본 대화는 {len(messages)}개의 메시지로 구성되어 있으며, 위 내용은 주요 {len(compressed_messages)}개 메시지의 요약입니다.]"
+        if len(messages) > len(processed_messages):
+            compression_note = f"\n\n[참고: 원본 대화는 {len(messages)}개의 메시지로 구성되어 있으며, 위 내용은 주요 {len(processed_messages)}개 메시지의 요약입니다.]"
             conversation_text += compression_note
 
         system_message = (
@@ -524,7 +586,7 @@ def start_discussion_api():
     return jsonify({"message": ai_message})
 
 
-# 4. 토론 메시지 처리 API
+# 4. 토론 메시지 처리 API (기존 방식 유지)
 @app.route('/api/discussion/message', methods=['POST'])
 def message_api():
     data = request.json
@@ -544,7 +606,82 @@ def message_api():
     return jsonify({"message": ai_response})
 
 
-# 5. 토론 요약 API (기존)
+# 4-1. 토론 메시지 처리 API (스트리밍 방식) - 새로 추가
+@app.route('/api/discussion/message/stream', methods=['POST'])
+def message_stream_api():
+    data = request.json
+    topic = data.get('topic')
+    user_position = data.get('userPosition')
+    ai_position = data.get('aiPosition')
+    difficulty = data.get('difficulty')
+    messages = data.get('messages')
+
+    if not all([topic, user_position, ai_position, difficulty, messages]):
+        return jsonify({"error": "모든 파라미터가 필요합니다"}), 400
+
+    logger.info(f"Processing streaming message for topic: {topic}")
+
+    def generate():
+        try:
+            # OpenAI 스트리밍 응답 생성
+            stream = generate_ai_response_stream(topic, user_position, ai_position, difficulty, messages)
+
+            if stream is None:
+                # 스트리밍 실패 시 에러 메시지 전송
+                yield f"data: {json.dumps({'error': '스트리밍 응답 생성에 실패했습니다.'})}\n\n"
+                return
+
+            # 스트리밍 응답 처리
+            accumulated_content = ""
+            for chunk in stream:
+                try:
+                    if chunk.choices[0].delta.content is not None:
+                        content = chunk.choices[0].delta.content
+                        accumulated_content += content
+
+                        # SSE 형태로 데이터 전송
+                        chunk_data = {
+                            "type": "chunk",
+                            "content": content,
+                            "accumulated": accumulated_content
+                        }
+                        yield f"data: {json.dumps(chunk_data)}\n\n"
+
+                except Exception as chunk_error:
+                    logger.error(f"청크 처리 중 오류: {chunk_error}")
+                    continue
+
+            # 완료 신호 전송
+            end_data = {
+                "type": "end",
+                "content": "",
+                "accumulated": accumulated_content,
+                "final_message": accumulated_content
+            }
+            yield f"data: {json.dumps(end_data)}\n\n"
+
+        except Exception as e:
+            logger.error(f"스트리밍 중 오류 발생: {e}")
+            error_data = {
+                "type": "error",
+                "error": str(e),
+                "message": "스트리밍 중 오류가 발생했습니다."
+            }
+            yield f"data: {json.dumps(error_data)}\n\n"
+
+    return Response(
+        generate(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Headers': 'Cache-Control'
+        }
+    )
+
+
+# 5. 토론 요약 API (통일된 압축 방식 적용)
 @app.route('/api/discussion/summary', methods=['POST'])
 def summary_api():
     data = request.json
@@ -566,7 +703,7 @@ def summary_api():
         return jsonify({"error": str(e)}), 500
 
 
-# 6. 토론 피드백 API (새로 추가)
+# 6. 토론 피드백 API (통일된 압축 방식 적용)
 @app.route('/api/discussion/feedback', methods=['POST'])
 def feedback_api():
     data = request.json
@@ -608,4 +745,4 @@ def feedback_api():
 # 메인 실행 부분
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=True, threaded=True)
