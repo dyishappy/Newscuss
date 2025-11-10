@@ -3,10 +3,12 @@ import os
 from openai import OpenAI
 import openai
 from newspaper import Article
-from gpt_module import extract_article_text, summarize_text_with_gpt, summarize_text_with_clova, summarize_text_with_kogpt, summarize_text_with_blc, summarize_text_with_kobart, extract_keywords_from_summary, generate_discussion_topic, interactive_debate, summarize_and_print_debate_results
+from gpt_module import extract_article_text, summarize_text_with_gpt, summarize_text_with_clova, summarize_text_with_kogpt, summarize_text_with_blc, summarize_text_with_kobart, summarize_text_with_solar, summarize_text_with_deepseek, extract_keywords_from_summary, generate_discussion_topic, interactive_debate, summarize_and_print_debate_results
+
+import argparse
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--modle',type=str,default=gpt)
+parser.add_argument('--model',type=str,default='gpt')
 parser.add_argument('--cache_dir',type=str,default='/hub')
 parser.add_argument('--client',type=str,default='gpt api key')
 args = parser.parse_args()
@@ -19,6 +21,8 @@ models_map = {
     'kogpt':  summarize_text_with_kogpt,
     'blc':    summarize_text_with_blc,
     'kobart': summarize_text_with_kobart,
+    'solar': summarize_text_with_solar,
+    'deepseek': summarize_text_with_deepseek,
 }
 
 sumarize_function = models_map[args.model]
@@ -36,6 +40,8 @@ article_text = extract_article_text(url)
 if not article_text:
     print("기사 텍스트를 추출하지 못했습니다.")
     exit(1)
+
+print(article_text)
 
 if args.model == 'gpt':
     # GPT 모델은 (client, text)

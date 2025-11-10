@@ -2,7 +2,7 @@ import os
 from openai import OpenAI
 import openai
 from newspaper import Article
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForCausalLM, PreTrainedTokenizerFast
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, AutoModelForCausalLM, PreTrainedTokenizerFast, GenerationConfig
 import torch
 
 # 1. 주어진 URL로부터 뉴스 기사의 텍스트 추출
@@ -20,9 +20,9 @@ def extract_article_text(url):
 # 2. 추출된 기사를 GPT API를 이용해 간결하게 요약
 
 # 2-1. GPT-4o
-def summarize_text_with_gpt(client, article_text, model="gpt-4o"):
+def summarize_text_with_gpt(client, article_text, model="gpt-4.1-nano-2025-04-14"):
     try:
-        instructions = "다음 뉴스 기사를 간결하게 요약해 주세요."
+        instructions = "다음 뉴스 기사를 3문장으로 요약해 주세요.:"
         response = client.responses.create(
             model=model,
             instructions=instructions,
@@ -263,6 +263,101 @@ def summarize_text_with_kobart(
     except Exception as e:
         print(f"요약 생성 중 오류 발생: {e}")
         return None
+# 2-6. upstage/solar-pro-preview-instruct -> unfinished
+def summarize_text_with_solar(
+    article_text: str,
+    cache_dir: str = None,
+    ):
+# Install requirements
+# !pip install transformers==4.44.2 torch==2.3.1 flash_attn==2.5.8 accelerate==0.31.0
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    tokenizer = AutoTokenizer.from_pretrained("upstage/solar-pro-preview-instruct")
+    model = AutoModelForCausalLM.from_pretrained(
+        "upstage/solar-pro-preview-instruct",
+        cache_dir=cache_dir,
+        device_map="cuda",  
+        torch_dtype="auto",  
+        trust_remote_code=True,
+    ).to(device)
+    model.eval()
+    # Apply chat template
+    messages = [
+        # (1) 시스템 레벨 안내 메시지를 넣고 싶으면 아래처럼 추가할 수 있습니다.
+        {"role": "system", "content": "당신 뉴스 기사를 요약해주는 AI입니다."},
+
+        # (2) 실제 사용자가 입력한 질문
+        {"role": "user", "content": f"다음 뉴스를 한국어로 3문장으로 요약해 주세요:\n\n{article_text}"},
+    ]
+    prompt = tokenizer.apply_chat_template(messages, return_tensors="pt", add_generation_prompt=True).to(model.device)
+    # Generate text
+    outputs = model.generate(prompt, max_new_tokens=512)
+    return tokenizer.decode(outputs[0])
+
+# 2-7. deepseek-ai/DeepSeek-V2-Lite-Chat
+def summarize_text_with_deepseek(
+    article_text: str,
+    cache_dir: str = None,
+):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # 1) DeepSeek 모델 로드
+    model_name = "deepseek-ai/DeepSeek-V2-Lite-Chat"
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True, cache_dir=cache_dir)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        trust_remote_code=True,
+        cache_dir=cache_dir,
+        torch_dtype=torch.bfloat16,
+    ).to(device)
+    model.eval()
+
+    # 2) pad_token_id 설정 (GenerationConfig 없이 수동으로 지정)
+    try:
+        from transformers import GenerationConfig
+        gen_conf = GenerationConfig.from_pretrained(model_name, cache_dir=cache_dir)
+        gen_conf.pad_token_id = gen_conf.eos_token_id
+        model.generation_config = gen_conf
+    except Exception:
+        model.config.pad_token_id = model.config.eos_token_id
+
+    # 3) Chat 메시지 구성
+    messages = [
+        {"role": "system", "content": "당신은 뉴스 기사를 요약해주는 AI입니다."},
+        {
+            "role": "user",
+            "content": (
+                f"다음 뉴스를 한국어로 3문장으로 요약해 주세요:\n\n{article_text}"
+            ),
+        },
+    ]
+
+    # 4) apply_chat_template 으로 input 텐서 생성
+    #    DeepSeek에서는 반환값이 바로 (batch_size, seq_len) 크기 Tensor임
+    input_tensor = tokenizer.apply_chat_template(
+        messages,
+        add_generation_prompt=True,
+        return_tensors="pt",
+    ).to(device)
+    # └─ 이제 input_tensor.shape == (1, sequence_length) 같은 형태
+
+    # 5) 요약문 생성
+    outputs = model.generate(
+        input_tensor,                    # “input_ids” 자리에 곧바로 input_tensor 사용
+        max_new_tokens=1024,
+        use_cache=True,
+        pad_token_id=tokenizer.eos_token_id,
+    )
+
+    # 6) 생성된 토큰에서 “프롬프트 부분”(=input_tensor 길이) 잘라내기
+    prompt_len = input_tensor.shape[1]
+    generated_tokens = outputs[0, prompt_len:]
+    summary = tokenizer.decode(generated_tokens, skip_special_tokens=True)
+
+    return summary
+
+    
 
 # 3. 요약문을 입력받아, 사용자가 지정한 개수만큼 핵심 키워드를 추출합니다.(default=2) 지시문에서는 키워드만 쉼표로 구분하여 출력하도록 요청
 def extract_keywords_from_summary(client, summary_text, num_keywords=2, model="gpt-4o"):
